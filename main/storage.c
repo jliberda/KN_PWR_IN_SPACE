@@ -5,20 +5,21 @@
 #include "nvs.h" // nvs_open, nvs_close, nvs_commit...
 #include "esp_err.h" // esp_err_t, ESP_OK...
 #include "storage.h" // declarations of the functs.
+#include "validate.h"
 
 // esp_err_t - typ danych int, przyjmujący wartości w postaci np. ESP_OK == 0. (Espressif Error Type)
 esp_err_t storage_init(void) {
     esp_err_t err = nvs_flash_init();
 
     if (err == ESP_ERR_NVS_NO_FREE_PAGES) {
-    printf("WARNING: NVS has no free pages, erasing partition and restoring defaults.\n");
-    nvs_flash_erase();
-    err = nvs_flash_init();
+        printf("WARNING: NVS has no free pages, erasing partition and restoring defaults.\n");
+        nvs_flash_erase();
+        err = nvs_flash_init();
     }
     else if (err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    printf("WARNING: NVS data is in a newer format, erasing partition and restoring defaults.\n");
-    nvs_flash_erase();
-    err = nvs_flash_init();
+        printf("WARNING: NVS data is in a newer format, erasing partition and restoring defaults.\n");
+        nvs_flash_erase();
+        err = nvs_flash_init();
     }
 
     return err;
@@ -30,29 +31,27 @@ esp_err_t storage_save(const char *type, const char *key, const char *value) {
     if (err != ESP_OK) return err;
 
     if (strcmp(type, "int") == 0) {
-            int v = atoi(value);
-            err = nvs_set_i32(handle, key, v);
+        if (!validate_int(value)) {nvs_close(handle); return ESP_ERR_INVALID_ARG;}
+        err = nvs_set_i32(handle, key, atoi(value));
     }
     else if (strcmp(type, "float") == 0) {
-            float v = atof(value);
-            err = nvs_set_blob(handle, key, &v, sizeof(v));
+        if (!validate_float(value)) {nvs_close(handle); return ESP_ERR_INVALID_ARG;}
+        float v = atof(value);
+        err = nvs_set_blob(handle, key, &v, sizeof(v));
     }
     else if (strcmp(type, "bool") == 0) {
-        if (strcmp(value, "true") == 0) {
-            err = nvs_set_u8(handle, key, 1);
-        } else {
-            err = nvs_set_u8(handle, key, 0);
-        }
+        if (!validate_bool(value)) {nvs_close(handle); return ESP_ERR_INVALID_ARG;}
+        err = nvs_set_u8(handle, key, strcmp(value, "true") == 0 ? 1 : 0);
     }
     else if (strcmp(type, "str") == 0) {
-            err = nvs_set_str(handle, key, value);
+        err = nvs_set_str(handle, key, value);
     }
     else {
         err = ESP_ERR_INVALID_ARG;
     }
 
     // writes the initialized above pairs into nvs partition's namespace.
-    if (err == ESP_OK) {err =nvs_commit(handle);}
+    if (err == ESP_OK) {err = nvs_commit(handle);}
 
     nvs_close(handle);
 
@@ -60,8 +59,14 @@ esp_err_t storage_save(const char *type, const char *key, const char *value) {
 }
 
 esp_err_t storage_set_default(void) {
-    nvs_flash_erase();
-    esp_err_t err = nvs_flash_init();
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err != ESP_OK) {return err;}
+
+    err = nvs_erase_all(handle); // erases only the namespace linked to handle, not whole flash. Helps not use up flash.
+    if (err == ESP_OK) {err = nvs_commit(handle);}
+    nvs_close(handle);
+
     if (err != ESP_OK) {return err;}
 
     storage_save("str", "rocket_name", "Atlantis");
@@ -136,12 +141,12 @@ void storage_list(void) {
     esp_err_t res = nvs_entry_find("nvs", "storage", NVS_TYPE_ANY, &iter);
     if (res != ESP_OK) {printf("No variables to be listed.\n"); return;}
     
-    printf("KEY : VALUE (type)\n");
+    printf(" --------------------\n| KEY = VALUE (type) |\n --------------------\n");
     while (res == ESP_OK) {
         nvs_entry_info_t info;
         nvs_entry_info(iter, &info);
 
-        printf("%s : ", info.key);
+        printf("%s = ", info.key);
         storage_read(info.key);
 
         res = nvs_entry_next(&iter); // move the pointer.
